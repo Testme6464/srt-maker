@@ -352,6 +352,7 @@ async function decodeMp4(progress){
   });
 
   const pump = (async ()=>{
+    let lastStateLog = 0, lastSig = '';
     while(!S.stopFlag){
       if(decodeErr || readyErr) break;
       if(!configured){ await sleep(120); continue; }
@@ -359,6 +360,11 @@ async function decodeMp4(progress){
       const c = pending.shift();
       if(c){ try{ decoder.decode(c); }catch(e){ decodeErr = e; break; } continue; }
       if(feedingDone) break;
+      // heartbeat: if stuck in same state 10s, log it (visible in diagnostics)
+      const sig = 'pending='+pending.length+' TQ='+TQ.length+' feedDone='+feedingDone+' chunks='+chunkCounter;
+      const now = Date.now();
+      if(sig !== lastSig){ lastSig = sig; lastStateLog = now; }
+      else if(now - lastStateLog > 10000){ lastStateLog = now; log('… စောင့်နေတယ်: '+sig); }
       await sleep(60);
     }
     try{ await decoder.flush(); }catch(e){}
@@ -375,15 +381,20 @@ async function decodeMp4(progress){
         srcRate = tr.audio.sample_rate; srcCh = tr.audio.channel_count;
         const codec = tr.codec;
         log('audio track: '+codec+' '+srcRate+'Hz x'+srcCh);
+        log('decoder ပြင်နေတယ်…');
+        const cfgTimer = setTimeout(()=>rej(new Error('decoder configure timeout (20s) — browser/WebCodecs issue')), 20000);
         AudioDecoder.isConfigSupported({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh})
           .then(s=>{
+            clearTimeout(cfgTimer);
+            log('decoder support: '+s.supported);
             if(!s.supported) return rej(new Error('codec မရဘူး: '+codec));
             decoder.configure({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh});
+            log('decoder configured ✓');
             mp4boxFile.setExtractionOptions(tr.id, null, {nbSamples:300});
             mp4boxFile.start();
             configured = true;
             res();
-          }).catch(rej);
+          }).catch(e=>{ clearTimeout(cfgTimer); log('decoder configure error: '+(e&&e.message||e)); rej(e); });
       }catch(e){ rej(e); }
     };
     mp4boxFile.onError = (e)=>rej(e || new Error('mp4 parse error'));
