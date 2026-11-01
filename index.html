@@ -95,9 +95,14 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 </div>
 
 <div class="card hidden" id="cTr">
-<h2>၄ · မြန်မာလို ပြန်မယ် <span class="note">(အင်တာနက်လိုတယ်)</span></h2>
-<button class="btn btn-s" id="bTr">🇲🇲 မြန်မာလို ပြန်မယ်</button>
+<h2>၄ · မြန်မာလို ပြန်မယ်</h2>
+<div class="row">
+<button class="btn btn-p" id="bTr">🌐 Google နဲ့ ပြန်မယ်</button>
+<button class="btn btn-s" id="bTrN">📴 Offline model (NLLB) နဲ့</button>
+</div>
+<div class="barwrap hidden" id="nllbBarW"><div class="barfill" id="nllbBar"></div></div>
 <div class="prog" id="trMsg"></div>
+<p class="note">Google = အင်တာနက်လို, အမြန်ဆုံး, မြန်မာလို အကောင်းဆုံး · NLLB = အင်တာနက်မလို (ပထမအကြိမ် ~600MB down ရမယ်, တစ်ခါပဲ)</p>
 </div>
 
 </div>
@@ -177,20 +182,25 @@ function collectSegs(){
 }
 
 /* ================= model ================= */
+const TR_URLS = [
+  'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2',
+  'https://unpkg.com/@xenova/transformers@2.17.2'
+];
+async function loadTR(){
+  if(S.TR) return S.TR;
+  let TR = null, lastErr = null;
+  for(const u of TR_URLS){ try{ TR = await import(u); break; }catch(e){ lastErr = e; } }
+  if(!TR) throw (lastErr || new Error('transformers.js load မရ'));
+  TR.env.allowLocalModels = false;
+  S.TR = TR;
+  return TR;
+}
 async function ensureModel(){
   if(S.pipe) return S.pipe;
   const msg = $('modelMsg'), barW = $('modelBarW'), bar = $('modelBar');
   barW.classList.remove('hidden');
   msg.textContent = 'model ပြင်နေတယ်…';
-  const TR_URLS = [
-    'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2',
-    'https://unpkg.com/@xenova/transformers@2.17.2'
-  ];
-  let TR = null, lastErr = null;
-  for(const u of TR_URLS){ try{ TR = await import(u); break; }catch(e){ lastErr = e; } }
-  if(!TR) throw (lastErr || new Error('transformers.js load မရ'));
-  S.TR = TR;
-  TR.env.allowLocalModels = false;
+  const TR = await loadTR();
   const seen = {};
   const pipe = await TR.pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
     dtype: 'q8',
@@ -458,7 +468,7 @@ async function transcribeLoop(){
     });
     const base = item.i * 30;
     const segs = (out.chunks||[])
-      .map(c=>({s: base + c.timestamp[0], e: base + c.timestamp[1], t: (c.text||'').trim()}))
+      .map(c=>({s: base + c.timestamp[0], e: base + c.timestamp[1], t: (c.text||'').trim(), lang: lang}))
       .filter(g=>g.t);
     S.doneIdx[item.i] = segs;
     done++;
@@ -653,6 +663,60 @@ $('bTr').addEventListener('click', async ()=>{
     S.segs.forEach((g, i)=>{ if(out[i]) g.t = out[i]; });
     renderResults();
     $('trMsg').textContent = 'ပြီးပြီ ✓ မြန်မာလို ပြန်ပြီးသား — SRT ဒေါင်းလို့ရ';
+  }catch(err){
+    $('trMsg').textContent = 'မအောင်မြင်ပါ: ' + (err && err.message || err);
+  }
+  btn.disabled = false;
+});
+
+/* ============ Burmese translate — offline NLLB-200 (best offline model) ============ */
+const NLLB_LANG = {en:'eng_Latn', zh:'zho_Hans', es:'spa_Latn', hi:'hin_Deva', th:'tha_Thai',
+  vi:'vie_Latn', ms:'msa_Latn', id:'ind_Latn', ja:'jpn_Jpan', ko:'kor_Hang',
+  fr:'fra_Latn', de:'deu_Latn', ar:'arb_Arab', ru:'rus_Cyrl'};
+let nllbPipe = null;
+async function ensureNllb(){
+  if(nllbPipe) return nllbPipe;
+  const TR = await loadTR();
+  const barW = $('nllbBarW'), bar = $('nllbBar'), msg = $('trMsg');
+  barW.classList.remove('hidden');
+  msg.textContent = 'NLLB model down နေတယ်… (~600MB, ပထမတစ်ခါပဲ)';
+  const seen = {};
+  nllbPipe = await TR.pipeline('translation', 'Xenova/nllb-200-distilled-600M', {
+    dtype: 'q8',
+    device: 'wasm',
+    progress_callback: (d)=>{
+      if(d.status === 'progress'){
+        seen[d.file || 'model'] = d.progress || 0;
+        const ks = Object.keys(seen);
+        const avg = ks.reduce((a,k)=>a+seen[k],0) / ks.length;
+        bar.style.width = Math.round(avg) + '%';
+        const mb = d.total ? (d.loaded/1048576).toFixed(0)+'/'+(d.total/1048576).toFixed(0)+'MB' : '';
+        msg.textContent = 'NLLB model down… '+Math.round(avg)+'% '+mb;
+      }else if(d.status === 'done'){
+        if(d.file) seen[d.file] = 100;
+      }
+    }
+  });
+  bar.style.width = '100%';
+  msg.textContent = 'NLLB အဆင်သင့် ✓ (offline)';
+  return nllbPipe;
+}
+$('bTrN').addEventListener('click', async ()=>{
+  if(!S.segs.length) return;
+  const btn = $('bTrN'); btn.disabled = true;
+  try{
+    const tr = await ensureNllb();
+    for(let i=0;i<S.segs.length;i++){
+      const g = S.segs[i];
+      const src = NLLB_LANG[g.lang] || NLLB_LANG[S.lang] || 'eng_Latn';
+      const out = await tr(g.t, {src_lang: src, tgt_lang: 'mya_Mymr', max_new_tokens: 256});
+      const txt = out && out[0] && out[0].translation_text;
+      if(txt) g.t = txt.trim();
+      $('trMsg').textContent = 'NLLB ပြန်နေတယ်… '+(i+1)+' / '+S.segs.length;
+      if(i % 3 === 0) await sleep(0);
+    }
+    renderResults();
+    $('trMsg').textContent = 'ပြီးပြီ ✓ NLLB (offline) နဲ့ မြန်မာလို ပြန်ပြီးသား';
   }catch(err){
     $('trMsg').textContent = 'မအောင်မြင်ပါ: ' + (err && err.message || err);
   }
