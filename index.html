@@ -369,23 +369,32 @@ async function decodeMp4(progress){
 
   const ready = new Promise((res, rej)=>{
     mp4boxFile.onReady = (info)=>{
-      const tr = (info.audioTracks||[])[0];
-      if(!tr) return rej(new Error('audio track မတွေ့ဘူး'));
-      srcRate = tr.audio.sample_rate; srcCh = tr.audio.channel_count;
-      const codec = tr.codec;
-      AudioDecoder.isConfigSupported({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh})
-        .then(s=>{
-          if(!s.supported) return rej(new Error('codec မရဘူး: '+codec));
-          decoder.configure({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh});
-          mp4boxFile.setExtractionOptions(tr.id, null, {nbSamples:300});
-          mp4boxFile.start();
-          configured = true;
-          res();
-        }).catch(rej);
+      try{
+        const tr = (info.audioTracks||[])[0];
+        if(!tr) return rej(new Error('audio track မတွေ့ဘူး'));
+        srcRate = tr.audio.sample_rate; srcCh = tr.audio.channel_count;
+        const codec = tr.codec;
+        log('audio track: '+codec+' '+srcRate+'Hz x'+srcCh);
+        AudioDecoder.isConfigSupported({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh})
+          .then(s=>{
+            if(!s.supported) return rej(new Error('codec မရဘူး: '+codec));
+            decoder.configure({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh});
+            mp4boxFile.setExtractionOptions(tr.id, null, {nbSamples:300});
+            mp4boxFile.start();
+            configured = true;
+            res();
+          }).catch(rej);
+      }catch(e){ rej(e); }
     };
     mp4boxFile.onError = (e)=>rej(e || new Error('mp4 parse error'));
   });
-  ready.catch(e=>{ readyErr = e; });
+  // safety: never hang silently if mp4box stays quiet (e.g. wrong container)
+  let readyTimer = null;
+  const readyWT = new Promise((res, rej)=>{
+    readyTimer = setTimeout(()=>rej(new Error('MP4 header ဖတ်မရ (30s) — file ပျက်နေတာ ဖြစ်နိုင်တယ်')), 30000);
+    ready.then(v=>{ clearTimeout(readyTimer); res(v); }, e=>{ clearTimeout(readyTimer); rej(e); });
+  });
+  readyWT.catch(e=>{ readyErr = e; });
 
   mp4boxFile.onSamples = (id, user, samples)=>{
     for(const s of samples){
@@ -481,19 +490,36 @@ function paintProgress(done){
   setRun(pct, total ? ('ပြီးပြီ '+done+' / '+total+' အပိုင်း') : ('ပြီးပြီ '+done+' အပိုင်း'));
 }
 
+async function detectContainer(file){
+  try{
+    const b = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+    const s = (o,n)=>String.fromCharCode.apply(null, Array.from(b.slice(o,o+n)));
+    if(s(4,4)==='ftyp') return 'mp4';
+    if(b[0]===0x1A&&b[1]===0x45&&b[2]===0xDF&&b[3]===0xA3) return 'webm';
+    if(s(0,4)==='RIFF'&&s(8,4)==='WAVE') return 'wav';
+  }catch(e){}
+  return 'unknown';
+}
+
 async function decodeAndTranscribe(){
   if(typeof AudioDecoder === 'undefined' || typeof EncodedAudioChunk === 'undefined')
     throw new Error('ဒီ browser က WebCodecs (audio decode) မရဘူး — Chrome သုံးပါ');
+  const kind = await detectContainer(S.file);
+  log('file အမျိုးအစား: ' + kind);
+  if(kind === 'webm')
+    throw new Error('ဒီ file က WebM ဖြစ်နေတယ် (.mp4 လို့ နာမည်မှားနေတာ) — SRT Maker က MP4/MOV/M4A/WAV ပဲ ရတယ်. video-subtitler.vercel.app က ပြန်ထုတ်ပါ (အခု MP4 အမှန် ထုတ်ပေးတယ်)');
+  if(kind !== 'mp4' && kind !== 'wav')
+    throw new Error('file အမျိုးအစား မသိဘူး — MP4/MOV/M4A/WAV ပဲ ရတယ်');
   TQ = []; decodeDone = false; decodeErr = null;
   accLen = 0; chunkCounter = 0;
   S.totalChunks = null;
-  const ext = (S.file.name.split('.').pop()||'').toLowerCase();
   const prog = (p)=>setRun(null, 'audio ထုတ်နေတယ်… '+Math.round(p*100)+'%');
   const t1 = transcribeLoop();
-  const t2 = (ext === 'wav') ? decodeWav(prog) : decodeMp4(prog);
+  const t2 = (kind === 'wav') ? decodeWav(prog) : decodeMp4(prog);
   await t1; await t2;
   if(decodeErr) throw decodeErr;
   S.totalChunks = chunkCounter;
+  log('decode ပြီးပြီ · အပိုင်း '+chunkCounter+' ခု');
   collectSegs(); saveProgress();
 }
 
