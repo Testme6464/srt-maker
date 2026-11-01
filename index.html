@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#6a3ec0">
+<title>SRT Maker — စာတန်းထုတ်မယ်</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Myanmar:wght@400;600;700&family=Padauk:wght@400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js"></script>
+<style>
+:root{--bg:#f4f3f8;--card:#fff;--ink:#1c2530;--mut:#66727f;--acc:#6a3ec0;--acc-d:#532e9e;--line:#e3e8ed}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Noto Sans Myanmar","Padauk",system-ui,sans-serif;line-height:1.6}
+.wrap{max-width:760px;margin:0 auto;padding:14px 14px 60px}
+h1{font-size:22px;margin:6px 0 2px}
+.sub{color:var(--mut);font-size:13px;margin:0 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin:12px 0}
+.card h2{font-size:16px;margin:0 0 10px}
+label.fl{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input[type=file]{width:100%}
+select{border:1px solid var(--line);border-radius:10px;padding:9px 10px;font-family:inherit;font-size:14px;max-width:100%}
+.btn{display:block;width:100%;border:0;border-radius:12px;padding:13px;font-size:16px;font-weight:700;font-family:inherit;cursor:pointer;margin:8px 0}
+.btn-p{background:var(--acc);color:#fff}
+.btn-p:active{background:var(--acc-d)}
+.btn-s{background:#eef2f5;color:var(--ink)}
+.btn:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row .btn{flex:1;min-width:140px}
+.prog{font-size:13px;color:var(--mut);min-height:20px;white-space:pre-wrap;overflow-wrap:anywhere}
+.barwrap{background:#e8e4f2;border-radius:8px;height:10px;overflow:hidden;margin:6px 0}
+.barfill{background:var(--acc);height:100%;width:0%;transition:width .3s}
+.log{background:#14101d;color:#c9bff2;border-radius:10px;padding:10px;font-size:12px;max-height:160px;overflow-y:auto;white-space:pre-wrap;margin:8px 0}
+.seg{border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0}
+.seg .trow{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.seg input.tt{width:104px;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-family:inherit}
+.seg textarea{width:100%;min-height:44px;font-size:14px;border:1px solid var(--line);border-radius:10px;padding:8px;font-family:inherit;margin:0}
+.mini{border:1px solid var(--line);background:#fff;border-radius:8px;padding:5px 9px;font-size:13px;font-family:inherit;cursor:pointer}
+.note{font-size:12px;color:var(--mut)}
+.hidden{display:none!important}
+a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-radius:12px;padding:13px;font-weight:700;text-decoration:none;margin:8px 0;overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>🎙️ SRT Maker</h1>
+<p class="sub">Video/Audio → စာတန်း (offline, Whisper Small) — ကိုယ်ပိုင် site</p>
+
+<div class="card">
+<h2>၁ · ဖိုင်ရွေးမယ်</h2>
+<input type="file" id="fMedia" accept="video/*,audio/*,.mp4,.m4a,.mov,.wav">
+<label class="fl">ဘာသာစကား (transcribe)</label>
+<select id="sLang">
+<option value="auto" selected>Auto-detect (အပိုင်းလိုက်)</option>
+<option value="en">English</option>
+<option value="zh">Chinese (中文)</option>
+<option value="es">Spanish</option>
+<option value="hi">Hindi</option>
+<option value="th">Thai (ไทย)</option>
+<option value="vi">Vietnamese</option>
+<option value="ms">Malay</option>
+<option value="id">Indonesian</option>
+<option value="ja">Japanese (日本語)</option>
+<option value="ko">Korean (한국어)</option>
+<option value="fr">French</option>
+<option value="de">German</option>
+<option value="ar">Arabic</option>
+<option value="ru">Russian</option>
+</select>
+<p class="note">MP4 / MOV / M4A / WAV ပဲ ရမယ် · မြန်မာစကားပြော transcribe မရဘူး (မော်ဒယ်အားနည်း) · ပထမအကြိမ် model (~250MB) down ရမယ်, ပြီးရင် offline သုံးလို့ရ</p>
+<div class="barwrap hidden" id="modelBarW"><div class="barfill" id="modelBar"></div></div>
+<div class="prog" id="modelMsg"></div>
+</div>
+
+<div class="card hidden" id="cRun">
+<h2>၂ · Transcribe လုပ်မယ်</h2>
+<div class="row">
+<button class="btn btn-p" id="bGo">▶ စမယ်</button>
+<button class="btn btn-s hidden" id="bAgain">↺ အစက ပြန်လုပ်မယ်</button>
+<button class="btn btn-s" id="bStop" disabled>⏹ ရပ်မယ်</button>
+</div>
+<div class="barwrap"><div class="barfill" id="runBar"></div></div>
+<div class="prog" id="runMsg"></div>
+<div class="log hidden" id="runLog"></div>
+</div>
+
+<div class="card hidden" id="cRes">
+<h2>၃ · စာတန်း <span class="note" id="segCount"></span></h2>
+<div id="segList"></div>
+<div class="row">
+<button class="btn btn-p" id="bSrt">⬇ SRT ဒေါင်းမယ်</button>
+<button class="btn btn-s" id="bVtt">⬇ VTT ဒေါင်းမယ်</button>
+</div>
+</div>
+
+<div class="card hidden" id="cTr">
+<h2>၄ · မြန်မာလို ပြန်မယ် <span class="note">(အင်တာနက်လိုတယ်)</span></h2>
+<button class="btn btn-s" id="bTr">🇲🇲 မြန်မာလို ပြန်မယ်</button>
+<div class="prog" id="trMsg"></div>
+</div>
+
+</div>
+<script>
+"use strict";
+/* ================= state & utils ================= */
+const $ = id => document.getElementById(id);
+const S = {
+  file: null, fileKey: '', lang: 'auto',
+  pipe: null, TR: null,
+  running: false, stopFlag: false,
+  segs: [],            // [{s,e,t}] sorted, merged from doneIdx
+  doneIdx: {},         // chunkIndex -> [{s,e,t}]
+  totalChunks: null,
+};
+const CHUNK = 480000; // 30s @ 16kHz mono
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function log(m){
+  const z = $('runLog'); z.classList.remove('hidden');
+  z.textContent += m + '\n'; z.scrollTop = z.scrollHeight;
+}
+function s2ts(sec){
+  sec = Math.max(0, +sec || 0);
+  const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60),
+        s=Math.floor(sec%60), ms=Math.round((sec%1)*1000);
+  const p=(n,l)=>String(n).padStart(l,'0');
+  return p(h,2)+':'+p(m,2)+':'+p(s,2)+','+p(ms,3);
+}
+function parseTime(str){
+  str = String(str).trim();
+  if(/^[0-9]+(\.[0-9]+)?$/.test(str)) return parseFloat(str);
+  let m = str.match(/(?:(\d+):)?(\d+):(\d+)[,.](\d{1,3})/);
+  if(m){const ms=(m[4]+'000').slice(0,3);return (+(m[1]||0))*3600+(+m[2])*60+(+m[3])+(+ms)/1000;}
+  m = str.match(/(?:(\d+):)?(\d+(?:\.\d+)?)/);
+  if(m) return (+(m[1]||0))*60+parseFloat(m[2]);
+  return NaN;
+}
+function buildSRT(segs){
+  return segs.map((g,i)=>(i+1)+'\n'+s2ts(g.s)+' --> '+s2ts(g.e)+'\n'+g.t+'\n').join('\n');
+}
+function buildVTT(segs){
+  const t = s => s2ts(s).replace(',', '.');
+  return 'WEBVTT\n\n' + segs.map(g=>t(g.s)+' --> '+t(g.e)+'\n'+g.t+'\n').join('\n');
+}
+function downloadBlob(blob, name){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 4000);
+}
+function baseName(n){return (n||'media').replace(/\.[^.]+$/,'')||'media';}
+
+/* ================= progress persistence ================= */
+function saveProgress(){
+  try{
+    localStorage.setItem(S.fileKey, JSON.stringify({doneIdx:S.doneIdx, total:S.totalChunks, name:S.file?S.file.name:'', lang:S.lang}));
+  }catch(e){}
+}
+function loadProgress(){
+  try{
+    const raw = localStorage.getItem(S.fileKey);
+    if(!raw) return null;
+    return JSON.parse(raw);
+  }catch(e){ return null; }
+}
+function clearProgress(){ try{ localStorage.removeItem(S.fileKey); }catch(e){} }
+function collectSegs(){
+  const out = [];
+  Object.keys(S.doneIdx).map(Number).sort((a,b)=>a-b).forEach(i=>{
+    (S.doneIdx[i]||[]).forEach(g=>out.push(g));
+  });
+  out.sort((a,b)=>a.s-b.s);
+  S.segs = out;
+}
+
+/* ================= model ================= */
+async function ensureModel(){
+  if(S.pipe) return S.pipe;
+  const msg = $('modelMsg'), barW = $('modelBarW'), bar = $('modelBar');
+  barW.classList.remove('hidden');
+  msg.textContent = 'model ပြင်နေတယ်…';
+  const TR_URLS = [
+    'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2',
+    'https://unpkg.com/@xenova/transformers@2.17.2'
+  ];
+  let TR = null, lastErr = null;
+  for(const u of TR_URLS){ try{ TR = await import(u); break; }catch(e){ lastErr = e; } }
+  if(!TR) throw (lastErr || new Error('transformers.js load မရ'));
+  S.TR = TR;
+  TR.env.allowLocalModels = false;
+  const seen = {};
+  const pipe = await TR.pipeline('automatic-speech-recognition', 'Xenova/whisper-small', {
+    dtype: 'q8',
+    device: 'wasm',
+    progress_callback: (d)=>{
+      if(d.status === 'progress'){
+        const k = d.file || 'model';
+        seen[k] = d.progress || 0;
+        const keys = Object.keys(seen);
+        const avg = keys.reduce((a,k)=>a+seen[k],0) / keys.length;
+        bar.style.width = Math.round(avg) + '%';
+        const mb = d.total ? (d.loaded/1048576).toFixed(0)+'/'+(d.total/1048576).toFixed(0)+'MB' : '';
+        msg.textContent = 'model down နေတယ်… ' + Math.round(avg) + '% ' + mb;
+      }else if(d.status === 'done'){
+        if(d.file) seen[d.file] = 100;
+      }
+    }
+  });
+  bar.style.width = '100%';
+  msg.textContent = 'model အဆင်သင့် ✓ (offline သုံးလို့ရ)';
+  S.pipe = pipe;
+  return pipe;
+}
+/* ================= audio decode (streaming) ================= */
+let TQ = [];                 // transcribe queue: [{i, pcm}]
+let decodeDone = false, decodeErr = null;
+let acc = new Float32Array(1<<20), accLen = 0, chunkCounter = 0;
+
+function accPush(samples){
+  if(accLen + samples.length > acc.length){
+    let n = acc.length;
+    while(n < accLen + samples.length) n *= 2;
+    const na = new Float32Array(n);
+    na.set(acc.subarray(0, accLen));
+    acc = na;
+  }
+  acc.set(samples, accLen); accLen += samples.length;
+  while(accLen >= CHUNK){
+    TQ.push({i: chunkCounter++, pcm: acc.slice(0, CHUNK)});
+    acc.copyWithin(0, CHUNK, accLen);
+    accLen -= CHUNK;
+  }
+}
+function accFlush(){
+  if(accLen >= 48000){ TQ.push({i: chunkCounter++, pcm: acc.slice(0, accLen)}); }
+  accLen = 0;
+}
+function resampleMono(input, fromRate, toRate){
+  if(fromRate === toRate) return input;
+  const ratio = fromRate / toRate;
+  const outLen = Math.max(1, Math.floor(input.length / ratio));
+  const out = new Float32Array(outLen);
+  for(let i=0;i<outLen;i++){
+    const pos = i * ratio;
+    const i0 = Math.floor(pos), i1 = Math.min(i0+1, input.length-1);
+    const f = pos - i0;
+    out[i] = input[i0]*(1-f) + input[i1]*f;
+  }
+  return out;
+}
+function handleAudioData(ad, srcRate, srcCh){
+  try{
+    const frames = ad.numberOfFrames;
+    if(frames <= 0) return;
+    const fmt = ad.format || '';
+    const ch = ad.numberOfChannels || srcCh || 1;
+    let mono;
+    if(fmt.indexOf('interleaved') < 0){
+      mono = new Float32Array(frames);
+      const tmp = new Float32Array(frames);
+      for(let p=0;p<ch;p++){
+        try{ ad.copyTo(tmp, {planeIndex:p}); }catch(e){ break; }
+        for(let i=0;i<frames;i++) mono[i] += tmp[i];
+      }
+      for(let i=0;i<frames;i++) mono[i] /= ch;
+    }else{
+      const inter = new Float32Array(Math.floor(ad.allocationSize()/4));
+      ad.copyTo(inter);
+      mono = new Float32Array(frames);
+      for(let i=0;i<frames;i++){ let s=0; for(let c=0;c<ch;c++) s+=inter[i*ch+c]; mono[i]=s/ch; }
+    }
+    accPush(resampleMono(mono, srcRate, 16000));
+  }finally{
+    try{ ad.close(); }catch(e){}
+  }
+}
+
+/* ---- WAV (slice-based, constant memory) ---- */
+async function decodeWav(progress){
+  const file = S.file;
+  const head = new DataView(await file.slice(0, 256).arrayBuffer());
+  const str = (o,n)=>{ let s=''; for(let i=0;i<n;i++) s+=String.fromCharCode(head.getUint8(o+i)); return s; };
+  if(str(0,4) !== 'RIFF' || str(8,4) !== 'WAVE') throw new Error('WAV မဟုတ်ဘူး');
+  let ch=0, rate=0, bits=0, fmt=0, dataOff=0, dataLen=0;
+  let o = 12;
+  while(o < 240){
+    const id = str(o,4), sz = head.getUint32(o+4, true);
+    if(id === 'fmt '){
+      fmt = head.getUint16(o+8, true); ch = head.getUint16(o+10, true);
+      rate = head.getUint32(o+12, true); bits = head.getUint16(o+22, true);
+    }else if(id === 'data'){ dataOff = o+8; dataLen = sz; break; }
+    o += 8 + sz;
+  }
+  if(!dataOff || !ch || !rate || !bits) throw new Error('WAV header ဖတ်မရ');
+  if(fmt !== 1 && fmt !== 3) throw new Error('WAV format မရဘူး (PCM only)');
+  if(bits !== 8 && bits !== 16 && bits !== 32) throw new Error('WAV bits မရဘူး');
+  const bytesPerFrame = ch * bits/8;
+  const SL = 4*1024*1024;
+  let off = dataOff;
+  const end = dataOff + dataLen;
+  while(off < end && !S.stopFlag){
+    while(TQ.length >= 3 && !S.stopFlag && !decodeErr) await sleep(300);
+    const e2 = Math.min(off+SL, end);
+    const dv = new DataView(await file.slice(off, e2).arrayBuffer());
+    const frames = Math.floor(dv.byteLength / bytesPerFrame);
+    const mono = new Float32Array(frames);
+    for(let i=0;i<frames;i++){
+      let s = 0;
+      for(let c=0;c<ch;c++){
+        const bo = i*bytesPerFrame + c*bits/8;
+        let v;
+        if(bits === 16) v = dv.getInt16(bo, true)/32768;
+        else if(bits === 8) v = (dv.getUint8(bo)-128)/128;
+        else v = dv.getFloat32(bo, true);
+        s += v;
+      }
+      mono[i] = s/ch;
+    }
+    accPush(resampleMono(mono, rate, 16000));
+    off = e2;
+    progress(off/file.size);
+  }
+  accFlush();
+  decodeDone = true;
+}
+
+/* ---- MP4/M4A/MOV via mp4box + WebCodecs ---- */
+async function decodeMp4(progress){
+  const file = S.file;
+  if(!window.MP4Box) throw new Error('mp4box library load မဖြစ်');
+  const mp4boxFile = MP4Box.createFile();
+  const pending = [];
+  let feedingDone = false, configured = false, readyErr = null;
+  let srcRate = 0, srcCh = 0;
+
+  const decoder = new AudioDecoder({
+    output: (ad)=>handleAudioData(ad, srcRate, srcCh),
+    error: (e)=>{ decodeErr = e; }
+  });
+
+  const pump = (async ()=>{
+    while(!S.stopFlag){
+      if(decodeErr || readyErr) break;
+      if(!configured){ await sleep(120); continue; }
+      if(TQ.length >= 3){ await sleep(300); continue; }
+      const c = pending.shift();
+      if(c){ try{ decoder.decode(c); }catch(e){ decodeErr = e; break; } continue; }
+      if(feedingDone) break;
+      await sleep(60);
+    }
+    try{ await decoder.flush(); }catch(e){}
+    accFlush();
+    decodeDone = true;
+    try{ decoder.close(); }catch(e){}
+  })();
+
+  const ready = new Promise((res, rej)=>{
+    mp4boxFile.onReady = (info)=>{
+      const tr = (info.audioTracks||[])[0];
+      if(!tr) return rej(new Error('audio track မတွေ့ဘူး'));
+      srcRate = tr.audio.sample_rate; srcCh = tr.audio.channel_count;
+      const codec = tr.codec;
+      AudioDecoder.isConfigSupported({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh})
+        .then(s=>{
+          if(!s.supported) return rej(new Error('codec မရဘူး: '+codec));
+          decoder.configure({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh});
+          mp4boxFile.setExtractionOptions(tr.id, null, {nbSamples:300});
+          mp4boxFile.start();
+          configured = true;
+          res();
+        }).catch(rej);
+    };
+    mp4boxFile.onError = (e)=>rej(e || new Error('mp4 parse error'));
+  });
+  ready.catch(e=>{ readyErr = e; });
+
+  mp4boxFile.onSamples = (id, user, samples)=>{
+    for(const s of samples){
+      pending.push(new EncodedAudioChunk({
+        type: s.is_sync ? 'key' : 'delta',
+        timestamp: Math.round(s.dts / s.timescale * 1e6),
+        duration: Math.round(s.duration / s.timescale * 1e6),
+        data: s.data
+      }));
+    }
+  };
+
+  const feed = (async ()=>{
+    const SL = 4*1024*1024;
+    let off = 0;
+    while(off < file.size && !S.stopFlag && !decodeErr && !readyErr){
+      while(pending.length > 800 && !S.stopFlag && !decodeErr && !readyErr) await sleep(200);
+      const e2 = Math.min(off+SL, file.size);
+      const buf = await file.slice(off, e2).arrayBuffer();
+      buf.fileStart = off;
+      try{ mp4boxFile.appendBuffer(buf); }catch(e){ decodeErr = e; break; }
+      off = e2;
+      progress(off/file.size);
+    }
+    try{ mp4boxFile.flush(); }catch(e){}
+    feedingDone = true;
+  })();
+
+  await Promise.all([pump, feed]);
+  if(readyErr) throw readyErr;
+  if(decodeErr) throw decodeErr;
+}
+/* ================= language detect + transcribe ================= */
+async function detectLang(pcm){
+  try{
+    const proc = S.pipe.processor;
+    if(!proc) return null;
+    let feats = null;
+    try{ feats = await proc(pcm); }catch(e){ return null; }
+    const input_features = feats && feats.input_features ? feats.input_features : null;
+    if(!input_features) return null;
+    const model = S.pipe.model;
+    const decoder_input_ids = new S.TR.Tensor('int64', [50258], [1, 1]);
+    const out = await model.generate({inputs: input_features, decoder_input_ids: decoder_input_ids, max_new_tokens: 1});
+    const id = Number(out.data[out.data.length - 1]);
+    const l2id = (model.generation_config && model.generation_config.lang_to_id) || {};
+    for(const k in l2id){
+      if(l2id[k] === id) return k.replace(/[<|>]/g, '');
+    }
+    return null;
+  }catch(e){ return null; }
+}
+
+function setRun(pct, msg){
+  if(typeof pct === 'number' && isFinite(pct))
+    $('runBar').style.width = Math.max(0, Math.min(100, pct)) + '%';
+  if(msg !== undefined) $('runMsg').textContent = msg;
+}
+
+async function transcribeLoop(){
+  let done = Object.keys(S.doneIdx).length;
+  while(!S.stopFlag){
+    const item = TQ.shift();
+    if(!item){
+      if(decodeDone) break;
+      await sleep(250); continue;
+    }
+    if(S.doneIdx[item.i]){ done++; paintProgress(done); continue; }
+    let lang = S.lang;
+    if(lang === 'auto'){
+      setRun(null, 'အပိုင်း '+(item.i+1)+' · ဘာသာစကား စစ်နေတယ်…');
+      lang = (await detectLang(item.pcm)) || 'en';
+      log('chunk '+(item.i+1)+': lang='+lang);
+    }
+    setRun(null, 'အပိုင်း '+(item.i+1)+(S.totalChunks?' / '+S.totalChunks:'')+' · transcribe ('+lang+')…');
+    const out = await S.pipe(item.pcm, {
+      return_timestamps: true,
+      chunk_length_s: 30, stride_length_s: 5,
+      language: lang, task: 'transcribe'
+    });
+    const base = item.i * 30;
+    const segs = (out.chunks||[])
+      .map(c=>({s: base + c.timestamp[0], e: base + c.timestamp[1], t: (c.text||'').trim()}))
+      .filter(g=>g.t);
+    S.doneIdx[item.i] = segs;
+    done++;
+    collectSegs(); saveProgress(); paintProgress(done);
+  }
+}
+function paintProgress(done){
+  const total = S.totalChunks;
+  const pct = total ? done/total*100 : 0;
+  setRun(pct, total ? ('ပြီးပြီ '+done+' / '+total+' အပိုင်း') : ('ပြီးပြီ '+done+' အပိုင်း'));
+}
+
+async function decodeAndTranscribe(){
+  if(typeof AudioDecoder === 'undefined' || typeof EncodedAudioChunk === 'undefined')
+    throw new Error('ဒီ browser က WebCodecs (audio decode) မရဘူး — Chrome သုံးပါ');
+  TQ = []; decodeDone = false; decodeErr = null;
+  accLen = 0; chunkCounter = 0;
+  S.totalChunks = null;
+  const ext = (S.file.name.split('.').pop()||'').toLowerCase();
+  const prog = (p)=>setRun(null, 'audio ထုတ်နေတယ်… '+Math.round(p*100)+'%');
+  const t1 = transcribeLoop();
+  const t2 = (ext === 'wav') ? decodeWav(prog) : decodeMp4(prog);
+  await t1; await t2;
+  if(decodeErr) throw decodeErr;
+  S.totalChunks = chunkCounter;
+  collectSegs(); saveProgress();
+}
+
+/* ================= UI glue ================= */
+function fileKeyFor(f){
+  let h = 0;
+  const s = f.name + '_' + f.size;
+  for(let i=0;i<s.length;i++){ h = ((h<<5)-h + s.charCodeAt(i)) | 0; }
+  return 'srtm_' + (h>>>0).toString(36);
+}
+$('fMedia').addEventListener('change', e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const ext = (f.name.split('.').pop()||'').toLowerCase();
+  if(['mp4','m4a','mov','wav'].indexOf(ext) < 0){
+    $('modelMsg').textContent = 'MP4 / MOV / M4A / WAV ပဲ ရမယ် ('+ext+' မရ)';
+    e.target.value = ''; return;
+  }
+  S.file = f; S.fileKey = fileKeyFor(f);
+  S.doneIdx = {}; S.segs = []; S.totalChunks = null;
+  const saved = loadProgress();
+  const go = $('bGo'), again = $('bAgain');
+  if(saved && saved.doneIdx && Object.keys(saved.doneIdx).length){
+    S.doneIdx = saved.doneIdx; S.totalChunks = saved.total || null;
+    collectSegs();
+    go.textContent = '↻ ဆက်လုပ်မယ် ('+Object.keys(S.doneIdx).length+' အပိုင်း ပြီးပြီးသား)';
+    again.classList.remove('hidden');
+    renderResults();
+  }else{
+    go.textContent = '▶ စမယ်';
+    again.classList.add('hidden');
+  }
+  $('cRun').classList.remove('hidden');
+  $('modelMsg').textContent = 'ဖိုင်: '+f.name+' ('+(f.size/1048576).toFixed(1)+' MB)';
+});
+$('sLang').addEventListener('change', e=>{ S.lang = e.target.value; saveProgress(); });
+
+$('bGo').addEventListener('click', async ()=>{
+  if(S.running) return;
+  if(!S.file){ setRun(0, 'ဖိုင်အရင်ရွေးပါ'); return; }
+  $('bGo').disabled = true; $('bStop').disabled = false;
+  S.running = true; S.stopFlag = false;
+  let wake = null;
+  try{ wake = await navigator.wakeLock.request('screen'); }catch(e){ wake = null; }
+  try{
+    $('runLog').textContent = '';
+    await ensureModel();
+    log('model ok · file=' + S.file.name);
+    await decodeAndTranscribe();
+    paintProgress(Object.keys(S.doneIdx).length);
+    setRun(100, 'ပြီးပြီ ✓ စာတန်း '+S.segs.length+' ခု');
+    log('done · segments=' + S.segs.length);
+    renderResults();
+  }catch(err){
+    setRun(0, 'မအောင်မြင်ပါ: ' + (err && err.message || err));
+    log('ERROR: ' + (err && err.message || err));
+  }
+  if(wake){ try{ await wake.release(); }catch(e){} }
+  S.running = false;
+  $('bGo').disabled = false; $('bStop').disabled = true;
+  $('bGo').textContent = Object.keys(S.doneIdx).length ? '↻ ဆက်လုပ်မယ်' : '▶ စမယ်';
+});
+$('bAgain').addEventListener('click', ()=>{
+  if(S.running) return;
+  S.doneIdx = {}; S.segs = []; S.totalChunks = null;
+  clearProgress(); renderResults();
+  $('bGo').textContent = '▶ စမယ်';
+  $('bAgain').classList.add('hidden');
+  setRun(0, 'အစက ပြန်လုပ်မယ် — စမယ် နှိပ်ပါ');
+});
+$('bStop').addEventListener('click', ()=>{
+  S.stopFlag = true;
+  setRun(null, 'ရပ်နေတယ်… (ပြီးသားအပိုင်းတွေ သိမ်းပြီးသား)');
+});
+/* ================= results editor + export ================= */
+function renderResults(){
+  const n = S.segs.length;
+  $('segCount').textContent = n ? '('+n+' ခု)' : '';
+  $('cRes').classList.toggle('hidden', !n);
+  $('cTr').classList.toggle('hidden', !n);
+  const z = $('segList'); z.innerHTML = '';
+  S.segs.forEach((g, idx)=>{
+    const d = document.createElement('div'); d.className = 'seg';
+    const head = document.createElement('div'); head.className = 'trow';
+    head.innerHTML = '<b>#'+(idx+1)+'</b>';
+    const mkInp = (k)=>{
+      const inp = document.createElement('input');
+      inp.className = 'tt'; inp.value = s2ts(g[k]);
+      inp.addEventListener('change', ()=>{
+        const s = parseTime(inp.value);
+        if(isNaN(s)){ inp.value = s2ts(g[k]); return; }
+        g[k] = Math.max(0, s); inp.value = s2ts(g[k]);
+      });
+      return inp;
+    };
+    const mkBtn = (label, fn)=>{
+      const b = document.createElement('button');
+      b.className = 'mini'; b.textContent = label; b.type = 'button';
+      b.addEventListener('click', fn);
+      return b;
+    };
+    head.appendChild(mkInp('s'));
+    head.appendChild(mkBtn('−.5', ()=>{ g.s=Math.max(0,g.s-0.5); renderResults(); }));
+    head.appendChild(mkBtn('+.5', ()=>{ g.s=g.s+0.5; renderResults(); }));
+    const ar = document.createElement('span'); ar.textContent = '→'; head.appendChild(ar);
+    head.appendChild(mkInp('e'));
+    head.appendChild(mkBtn('−.5', ()=>{ g.e=Math.max(0,g.e-0.5); renderResults(); }));
+    head.appendChild(mkBtn('+.5', ()=>{ g.e=g.e+0.5; renderResults(); }));
+    const del = mkBtn('ဖျက်', ()=>{ S.segs.splice(idx,1); renderResults(); });
+    del.style.marginLeft = 'auto'; del.style.color = '#c00';
+    head.appendChild(del);
+    const ta = document.createElement('textarea');
+    ta.rows = 2; ta.value = g.t;
+    ta.addEventListener('input', ()=>{ g.t = ta.value; });
+    d.appendChild(head); d.appendChild(ta);
+    z.appendChild(d);
+  });
+}
+$('bSrt').addEventListener('click', ()=>{
+  if(!S.segs.length) return;
+  downloadBlob(new Blob([buildSRT(S.segs)], {type:'text/srt;charset=utf-8'}), baseName(S.file && S.file.name)+'.srt');
+});
+$('bVtt').addEventListener('click', ()=>{
+  if(!S.segs.length) return;
+  downloadBlob(new Blob([buildVTT(S.segs)], {type:'text/vtt;charset=utf-8'}), baseName(S.file && S.file.name)+'.vtt');
+});
+
+/* ================= Burmese translate ================= */
+async function gtxBatch(texts){
+  const out = [];
+  for(let i=0;i<texts.length;i+=15){
+    const batch = texts.slice(i, i+15);
+    const url = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=my&dt=t&q=' +
+      batch.map(t=>encodeURIComponent(t)).join('&q=');
+    const r = await fetch(url);
+    if(!r.ok) throw new Error('translate http '+r.status);
+    const j = await r.json();
+    if(!j || !j[0]) throw new Error('translate parse');
+    j[0].forEach((pair, k)=>{ out[i+k] = (pair && pair[0]) || batch[k]; });
+    $('trMsg').textContent = 'ပြန်နေတယ်… '+Math.min(i+15, texts.length)+' / '+texts.length;
+  }
+  return out;
+}
+async function myMemory(text){
+  const r = await fetch('https://api.mymemory.translated.net/get?q='+encodeURIComponent(text)+'&langpair=autodetect|my');
+  const j = await r.json();
+  if(j && j.responseData && j.responseData.translatedText) return j.responseData.translatedText;
+  throw new Error('mymemory');
+}
+$('bTr').addEventListener('click', async ()=>{
+  if(!S.segs.length) return;
+  const btn = $('bTr'); btn.disabled = true;
+  $('trMsg').textContent = 'ပြန်နေတယ်… (အင်တာနက်လိုတယ်)';
+  try{
+    const texts = S.segs.map(g=>g.t);
+    let out;
+    try{ out = await gtxBatch(texts); }
+    catch(e){
+      $('trMsg').textContent = 'gtx မရ — အရန်နည်း စမ်းနေတယ်…';
+      out = [];
+      for(let i=0;i<texts.length;i++){
+        try{ out.push(await myMemory(texts[i])); }
+        catch(e2){ out.push(texts[i]); }
+        if(i % 5 === 0) $('trMsg').textContent = 'ပြန်နေတယ်… '+i+' / '+texts.length;
+        await sleep(150);
+      }
+    }
+    S.segs.forEach((g, i)=>{ if(out[i]) g.t = out[i]; });
+    renderResults();
+    $('trMsg').textContent = 'ပြီးပြီ ✓ မြန်မာလို ပြန်ပြီးသား — SRT ဒေါင်းလို့ရ';
+  }catch(err){
+    $('trMsg').textContent = 'မအောင်မြင်ပါ: ' + (err && err.message || err);
+  }
+  btn.disabled = false;
+});
+</script>
+</body>
+</html>
