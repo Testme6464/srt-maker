@@ -108,7 +108,7 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 </div>
 <script>
 "use strict";
-const APP_VER = 'v11-chunk';
+const APP_VER = 'v12-flush';
 document.getElementById('verTag').textContent = '· ' + APP_VER;
 /* ================= state & utils ================= */
 const $ = id => document.getElementById(id);
@@ -365,11 +365,11 @@ async function decodeMp4(progress){
       if(feedingDone) break;
       await sleep(60);
     }
-    log('decode calls ပြီးပြီ · flush စမယ်…');
+    log('decode calls ပြီးပြီ · outputs='+outCount+' · flush စမယ်…');
     try{
       await Promise.race([
         decoder.flush(),
-        sleep(30000).then(()=>{ throw new Error('decoder flush timeout (30s)'); })
+        sleep(5000).then(()=>{ throw new Error('flush timeout (5s)'); })
       ]);
       log('decoder flush ok ✓');
     }catch(e){
@@ -377,7 +377,7 @@ async function decodeMp4(progress){
     }
     accFlush();
     decodeDone = true;
-    log('decoder outputs: '+outCount+' · TQ: '+TQ.length+' chunks');
+    log('TQ chunks: '+TQ.length);
     try{ decoder.close(); }catch(e){}
   })();
 
