@@ -45,7 +45,7 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 <body>
 <div class="wrap">
 <h1>🎙️ SRT Maker</h1>
-<p class="sub">Video/Audio → စာတန်း (offline, Whisper Small) — ကိုယ်ပိုင် site</p>
+<p class="sub">Video/Audio → စာတန်း (offline, Whisper Small) — ကိုယ်ပိုင် site <span class="note" id="verTag"></span></p>
 
 <div class="card">
 <h2>၁ · ဖိုင်ရွေးမယ်</h2>
@@ -108,6 +108,8 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 </div>
 <script>
 "use strict";
+const APP_VER = 'v5-diag';
+document.getElementById('verTag').textContent = '· ' + APP_VER;
 /* ================= state & utils ================= */
 const $ = id => document.getElementById(id);
 const S = {
