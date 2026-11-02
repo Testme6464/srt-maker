@@ -108,7 +108,7 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 </div>
 <script>
 "use strict";
-const APP_VER = 'v12-flush';
+const APP_VER = 'v15-simple';
 document.getElementById('verTag').textContent = '· ' + APP_VER;
 /* ================= state & utils ================= */
 const $ = id => document.getElementById(id);
@@ -424,7 +424,7 @@ async function decodeMp4(progress){
   // onSamples: async extraction (reliable decode when it fires)
   mp4boxFile.onSamples = (id, user, samples)=>{
     for(const s of samples){
-      if(!s.data || s.data.byteLength < 16) continue; // skip truncated
+      if(!s.data || !s.data.byteLength) continue;
       pending.push(new EncodedAudioChunk({
         type: 'key',
         timestamp: Math.round(s.dts / s.timescale * 1e6),
