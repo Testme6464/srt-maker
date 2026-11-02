@@ -108,7 +108,7 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 </div>
 <script>
 "use strict";
-const APP_VER = 'v9-sync';
+const APP_VER = 'v10-async';
 document.getElementById('verTag').textContent = '· ' + APP_VER;
 /* ================= state & utils ================= */
 const $ = id => document.getElementById(id);
@@ -344,109 +344,114 @@ async function decodeMp4(progress){
   const file = S.file;
   if(!window.MP4Box) throw new Error('mp4box library load မဖြစ်');
   const mp4boxFile = MP4Box.createFile();
-  let srcRate = 0, srcCh = 0, trackId = 0, codec = '';
+  const pending = [];
+  let feedingDone = false, configured = false;
+  let srcRate = 0, srcCh = 0, trackId = 0;
 
-  // ---- feed all data first (fast), capture track info onReady ----
-  let readyInfo = null, readyErrLocal = null;
-  mp4boxFile.onReady = (info)=>{ readyInfo = info; };
-  mp4boxFile.onError = (e)=>{ readyErrLocal = e || new Error('mp4 parse error'); };
-  {
-    const SL = 4*1024*1024;
-    let off = 0;
-    while(off < file.size && !S.stopFlag && !readyErrLocal){
-      const e2 = Math.min(off+SL, file.size);
-      const buf = await file.slice(off, e2).arrayBuffer();
-      buf.fileStart = off;
-      try{ mp4boxFile.appendBuffer(buf); }catch(e){ readyErrLocal = e; break; }
-      off = e2;
-      progress(off/file.size * 0.5); // feed = first half of decode progress
-    }
-    try{ mp4boxFile.flush(); }catch(e){}
-  }
-  // onReady should have fired during appendBuffer; wait briefly if not
-  {
-    const t0 = Date.now();
-    while(!readyInfo && !readyErrLocal && !S.stopFlag && Date.now()-t0 < 15000) await sleep(100);
-  }
-  if(readyErrLocal) throw readyErrLocal;
-  if(!readyInfo) throw new Error('MP4 header ဖတ်မရ — file ပျက်နေတာ ဖြစ်နိုင်တယ်');
-  {
-    const trs = (readyInfo.audioTracks||[]);
-    log('audio tracks: '+trs.length);
-    const tr = trs[0];
-    if(!tr) throw new Error('audio track မတွေ့ဘူး');
-    trackId = tr.id; codec = tr.codec;
-    srcRate = tr.audio.sample_rate; srcCh = tr.audio.channel_count;
-    log('audio track: id='+trackId+' '+codec+' '+srcRate+'Hz x'+srcCh);
-  }
-
-  // ---- configure WebCodecs decoder ----
-  log('decoder ပြင်နေတယ်…');
   const decoder = new AudioDecoder({
     output: (ad)=>handleAudioData(ad, srcRate, srcCh),
     error: (e)=>{ decodeErr = e; }
   });
-  {
-    const cfgTimer = setTimeout(()=>{ decodeErr = decodeErr || new Error('decoder configure timeout (20s)'); }, 20000);
-    let sup = null;
-    try{ sup = await AudioDecoder.isConfigSupported({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh}); }
-    catch(e){ clearTimeout(cfgTimer); throw e; }
-    clearTimeout(cfgTimer);
-    log('decoder support: '+sup.supported);
-    if(!sup.supported) throw new Error('codec မရဘူး: '+codec);
-    decoder.configure({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh});
-    log('decoder configured ✓');
-  }
 
-  // ---- synchronous sample reading (no async extraction races) ----
-  const samples = mp4boxFile.getTrackSamplesInfo(trackId) || [];
-  log('audio samples: '+samples.length);
-  if(!samples.length) throw new Error('audio sample မရှိဘူး — file ပျက်နေတာ ဖြစ်နိုင်တယ်');
-  let encCount = 0;
-  for(let i=0; i<samples.length && !S.stopFlag && !decodeErr; i++){
-    let s = null;
-    try{ s = mp4boxFile.getTrackSample(trackId, i); }catch(e){ log('sample '+i+' read error: '+(e&&e.message||e)); continue; }
-    if(!s || !s.data || !s.data.length) continue;
-    // skip truncated final frames (e.g. 5-byte padding) — they hang the decoder
-    if(s.data.length < 16) continue;
-    const ts = s.timescale || 1;
-    // getTrackSample returns a Uint8Array view; WebCodecs wants a clean ArrayBuffer
-    // (passing the view directly makes the decoder stall silently)
-    const ab = s.data.buffer.slice(s.data.byteOffset, s.data.byteOffset + s.data.byteLength);
-    const chunk = new EncodedAudioChunk({
-      type: 'key', // audio frames are independently decodable
-      timestamp: Math.round((s.dts||0) / ts * 1e6),
-      duration: Math.round((s.duration||0) / ts * 1e6),
-      data: ab
-    });
-    try{ decoder.decode(chunk); }
-    catch(e){ decodeErr = e; break; }
-    encCount++;
-    // yield to event loop so decoder output callbacks can fire
-    // (tight loop starves them → silent stall)
-    if(encCount % 10 === 0) await sleep(0);
-    // backpressure: don't flood the decoder queue
-    let guard = 0;
-    while(decoder.decodeQueueSize > 24 && !S.stopFlag && !decodeErr && guard++ < 200) await sleep(100);
-    // free sample data periodically (memory)
-    if(i % 1000 === 999){ try{ mp4boxFile.releaseUsedSamples(trackId, i); }catch(e){} }
-    if(i % 200 === 0) progress(0.5 + (i/samples.length)*0.5);
-  }
-  log('decode calls: '+encCount+' · flush စမယ်…');
-  try{
-    await Promise.race([
-      decoder.flush(),
-      sleep(30000).then(()=>{ throw new Error('decoder flush timeout (30s)'); })
-    ]);
-    log('decoder flush ok ✓');
-  }catch(e){
-    log('flush issue: '+(e&&e.message||e)+' — ရသလောက် ဆက်မယ်');
-  }
-  accFlush();
-  decodeDone = true;
-  try{ decoder.close(); }catch(e){}
+  // pump: feed pending chunks to decoder
+  const pump = (async ()=>{
+    while(!S.stopFlag){
+      if(decodeErr || readyErr) break;
+      if(!configured){ await sleep(120); continue; }
+      if(TQ.length >= 3){ await sleep(300); continue; }
+      const c = pending.shift();
+      if(c){ try{ decoder.decode(c); }catch(e){ decodeErr = e; break; } continue; }
+      if(feedingDone) break;
+      await sleep(60);
+    }
+    log('decode calls ပြီးပြီ · flush စမယ်…');
+    try{
+      await Promise.race([
+        decoder.flush(),
+        sleep(30000).then(()=>{ throw new Error('decoder flush timeout (30s)'); })
+      ]);
+      log('decoder flush ok ✓');
+    }catch(e){
+      log('flush issue: '+(e&&e.message||e)+' — ရသလောက် ဆက်မယ်');
+    }
+    accFlush();
+    decodeDone = true;
+    try{ decoder.close(); }catch(e){}
+  })();
+
+  // onReady: start extraction IMMEDIATELY (sync), configure decoder in parallel
+  const ready = new Promise((res, rej)=>{
+    mp4boxFile.onReady = (info)=>{
+      try{
+        const trs = (info.audioTracks||[]);
+        log('audio tracks: '+trs.length);
+        const tr = trs[0];
+        if(!tr) return rej(new Error('audio track မတွေ့ဘူး'));
+        trackId = tr.id;
+        srcRate = tr.audio.sample_rate; srcCh = tr.audio.channel_count;
+        const codec = tr.codec;
+        log('audio track: id='+trackId+' '+codec+' '+srcRate+'Hz x'+srcCh);
+        // Start extraction SYNCHRONOUSLY — don't wait for decoder config.
+        // (Waiting for async isConfigSupported lets the fast feed finish first,
+        //  and mp4box then extracts nothing.)
+        mp4boxFile.setExtractionOptions(trackId, null, {nbSamples:100});
+        mp4boxFile.start();
+        log('extraction started ✓');
+        // Configure decoder in parallel
+        log('decoder ပြင်နေတယ်…');
+        AudioDecoder.isConfigSupported({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh})
+          .then(s=>{
+            log('decoder support: '+s.supported);
+            if(!s.supported) return rej(new Error('codec မရဘူး: '+codec));
+            decoder.configure({codec:codec, sampleRate:srcRate, numberOfChannels:srcCh});
+            log('decoder configured ✓');
+            configured = true;
+            res();
+          }).catch(e=>{ log('decoder configure error: '+(e&&e.message||e)); rej(e); });
+      }catch(e){ rej(e); }
+    };
+    mp4boxFile.onError = (e)=>rej(e || new Error('mp4 parse error'));
+  });
+  let readyTimer = null;
+  const readyWT = new Promise((res, rej)=>{
+    readyTimer = setTimeout(()=>rej(new Error('MP4 header ဖတ်မရ (30s)')), 30000);
+    ready.then(v=>{ clearTimeout(readyTimer); res(v); }, e=>{ clearTimeout(readyTimer); rej(e); });
+  });
+  readyWT.catch(e=>{ readyErr = e; });
+
+  // onSamples: async extraction (reliable decode when it fires)
+  mp4boxFile.onSamples = (id, user, samples)=>{
+    for(const s of samples){
+      if(!s.data || s.data.byteLength < 16) continue; // skip truncated
+      pending.push(new EncodedAudioChunk({
+        type: 'key',
+        timestamp: Math.round(s.dts / s.timescale * 1e6),
+        duration: Math.round(s.duration / s.timescale * 1e6),
+        data: s.data
+      }));
+    }
+  };
+
+  // feed
+  const feed = (async ()=>{
+    const SL = 4*1024*1024;
+    let off = 0;
+    while(off < file.size && !S.stopFlag && !decodeErr && !readyErr){
+      while(pending.length > 800 && !S.stopFlag && !decodeErr && !readyErr) await sleep(200);
+      const e2 = Math.min(off+SL, file.size);
+      const buf = await file.slice(off, e2).arrayBuffer();
+      buf.fileStart = off;
+      try{ mp4boxFile.appendBuffer(buf); }catch(e){ decodeErr = e; break; }
+      off = e2;
+      progress(off/file.size);
+    }
+    try{ mp4boxFile.flush(); }catch(e){}
+    feedingDone = true;
+  })();
+
+  await Promise.all([pump, feed]);
+  if(readyErr) throw readyErr;
   if(decodeErr) throw decodeErr;
-  progress(1);
 }
 /* ================= language detect + transcribe ================= */
 async function detectLang(pcm){
