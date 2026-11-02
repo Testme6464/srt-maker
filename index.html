@@ -108,7 +108,7 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 </div>
 <script>
 "use strict";
-const APP_VER = 'v10-async';
+const APP_VER = 'v11-chunk';
 document.getElementById('verTag').textContent = '· ' + APP_VER;
 /* ================= state & utils ================= */
 const $ = id => document.getElementById(id);
@@ -120,7 +120,7 @@ const S = {
   doneIdx: {},         // chunkIndex -> [{s,e,t}]
   totalChunks: null,
 };
-const CHUNK = 480000; // 30s @ 16kHz mono
+const CHUNK = 240000; // 15s @ 16kHz mono (smaller = TQ fills sooner, better for short files)
 const sleep = ms => new Promise(r=>setTimeout(r, ms));
 
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -229,7 +229,7 @@ async function ensureModel(){
 /* ================= audio decode (streaming) ================= */
 let TQ = [];                 // transcribe queue: [{i, pcm}]
 let decodeDone = false, decodeErr = null, readyErr = null;
-let acc = new Float32Array(1<<20), accLen = 0, chunkCounter = 0;
+let acc = new Float32Array(1<<20), accLen = 0, chunkCounter = 0, outCount = 0;
 
 function accPush(samples){
   if(accLen + samples.length > acc.length){
@@ -247,7 +247,7 @@ function accPush(samples){
   }
 }
 function accFlush(){
-  if(accLen >= 48000){ TQ.push({i: chunkCounter++, pcm: acc.slice(0, accLen)}); }
+  if(accLen >= 16000){ TQ.push({i: chunkCounter++, pcm: acc.slice(0, accLen)}); }
   accLen = 0;
 }
 function resampleMono(input, fromRate, toRate){
@@ -264,6 +264,7 @@ function resampleMono(input, fromRate, toRate){
   return out;
 }
 function handleAudioData(ad, srcRate, srcCh){
+  outCount++;
   try{
     const frames = ad.numberOfFrames;
     if(frames <= 0) return;
@@ -376,6 +377,7 @@ async function decodeMp4(progress){
     }
     accFlush();
     decodeDone = true;
+    log('decoder outputs: '+outCount+' · TQ: '+TQ.length+' chunks');
     try{ decoder.close(); }catch(e){}
   })();
 
@@ -515,7 +517,7 @@ async function transcribeLoop(){
     }finally{
       alive = false; clearInterval(hb);
     }
-    const base = item.i * 30;
+    const base = item.i * 15;
     const segs = (out.chunks||[])
       .map(c=>({s: base + c.timestamp[0], e: base + c.timestamp[1], t: (c.text||'').trim(), lang: lang}))
       .filter(g=>g.t);
@@ -554,7 +556,7 @@ async function decodeAndTranscribe(){
   if(kind !== 'mp4' && kind !== 'wav')
     throw new Error('file အမျိုးအစား မသိဘူး — MP4/MOV/M4A/WAV ပဲ ရတယ်');
   TQ = []; decodeDone = false; decodeErr = null; readyErr = null;
-  accLen = 0; chunkCounter = 0;
+  accLen = 0; chunkCounter = 0; outCount = 0;
   S.totalChunks = null; S.transcribeStarted = false;
   const prog = (p)=>{
     if(!S.transcribeStarted) setRun(null, 'audio ထုတ်နေတယ်… '+Math.round(p*100)+'%');
