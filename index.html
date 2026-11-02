@@ -108,7 +108,7 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 </div>
 <script>
 "use strict";
-const APP_VER = 'v7-errfix';
+const APP_VER = 'v8-decode';
 document.getElementById('verTag').textContent = '· ' + APP_VER;
 /* ================= state & utils ================= */
 const $ = id => document.getElementById(id);
@@ -369,7 +369,16 @@ async function decodeMp4(progress){
       else if(now - lastStateLog > 10000){ lastStateLog = now; log('… စောင့်နေတယ်: '+sig); }
       await sleep(60);
     }
-    try{ await decoder.flush(); }catch(e){}
+    log('decode calls ပြီးပြီ · flush စမယ်… (chunks='+chunkCounter+')');
+    try{
+      await Promise.race([
+        decoder.flush(),
+        sleep(30000).then(()=>{ throw new Error('decoder flush timeout (30s)'); })
+      ]);
+      log('decoder flush ok ✓');
+    }catch(e){
+      log('flush issue: '+(e&&e.message||e)+' — ရသလောက် ဆက်မယ်');
+    }
     accFlush();
     decodeDone = true;
     try{ decoder.close(); }catch(e){}
@@ -411,8 +420,10 @@ async function decodeMp4(progress){
 
   mp4boxFile.onSamples = (id, user, samples)=>{
     for(const s of samples){
+      // audio frames are independently decodable → always 'key'
+      // (mp4box is_sync flags caused WebCodecs to stall on some files)
       pending.push(new EncodedAudioChunk({
-        type: s.is_sync ? 'key' : 'delta',
+        type: 'key',
         timestamp: Math.round(s.dts / s.timescale * 1e6),
         duration: Math.round(s.duration / s.timescale * 1e6),
         data: s.data
