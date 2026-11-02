@@ -108,7 +108,7 @@ a.dl{display:block;text-align:center;background:var(--acc);color:#fff;border-rad
 </div>
 <script>
 "use strict";
-const APP_VER = 'v5-diag';
+const APP_VER = 'v6-progress';
 document.getElementById('verTag').textContent = '· ' + APP_VER;
 /* ================= state & utils ================= */
 const $ = id => document.getElementById(id);
@@ -477,17 +477,31 @@ async function transcribeLoop(){
     }
     if(S.doneIdx[item.i]){ done++; paintProgress(done); continue; }
     let lang = S.lang;
+    const total = S.totalChunks ? ' / '+S.totalChunks : '';
+    S.transcribeStarted = true;
     if(lang === 'auto'){
-      setRun(null, 'အပိုင်း '+(item.i+1)+' · ဘာသာစကား စစ်နေတယ်…');
-      lang = (await detectLang(item.pcm)) || 'en';
-      log('chunk '+(item.i+1)+': lang='+lang);
+      setRun(null, '🔍 အပိုင်း '+(item.i+1)+total+' · ဘာသာစကား စစ်နေတယ်…');
+      log('အပိုင်း '+(item.i+1)+' · ဘာသာစကား စစ်နေတယ်…');
+      lang = (await Promise.race([detectLang(item.pcm), sleep(60000).then(()=>null)])) || 'en';
+      log('အပိုင်း '+(item.i+1)+': lang='+lang);
     }
-    setRun(null, 'အပိုင်း '+(item.i+1)+(S.totalChunks?' / '+S.totalChunks:'')+' · transcribe ('+lang+')…');
-    const out = await S.pipe(item.pcm, {
-      return_timestamps: true,
-      chunk_length_s: 30, stride_length_s: 5,
-      language: lang, task: 'transcribe'
-    });
+    setRun(null, '🎙️ အပိုင်း '+(item.i+1)+total+' · transcribe ('+lang+')… ⏳');
+    log('အပိုင်း '+(item.i+1)+' transcribe စမယ် ('+lang+')…');
+    const t0 = Date.now();
+    let alive = true;
+    const hb = setInterval(()=>{
+      if(alive) setRun(null, '🎙️ အပိုင်း '+(item.i+1)+total+' · လုပ်နေတယ်… ⏳ '+Math.round((Date.now()-t0)/1000)+'s');
+    }, 5000);
+    let out;
+    try{
+      out = await S.pipe(item.pcm, {
+        return_timestamps: true,
+        chunk_length_s: 30, stride_length_s: 5,
+        language: lang, task: 'transcribe'
+      });
+    }finally{
+      alive = false; clearInterval(hb);
+    }
     const base = item.i * 30;
     const segs = (out.chunks||[])
       .map(c=>({s: base + c.timestamp[0], e: base + c.timestamp[1], t: (c.text||'').trim(), lang: lang}))
@@ -495,12 +509,15 @@ async function transcribeLoop(){
     S.doneIdx[item.i] = segs;
     done++;
     collectSegs(); saveProgress(); paintProgress(done);
+    log('အပိုင်း '+(item.i+1)+' ပြီးပြီ ✓ ('+segs.length+' စာတန်း, '+Math.round((Date.now()-t0)/1000)+'s)');
   }
 }
 function paintProgress(done){
   const total = S.totalChunks;
   const pct = total ? done/total*100 : 0;
-  setRun(pct, total ? ('ပြီးပြီ '+done+' / '+total+' အပိုင်း') : ('ပြီးပြီ '+done+' အပိုင်း'));
+  // bar only — don't overwrite the live transcription message
+  if(typeof pct === 'number' && isFinite(pct))
+    $('runBar').style.width = Math.max(0, Math.min(100, pct)) + '%';
 }
 
 async function detectContainer(file){
@@ -525,8 +542,10 @@ async function decodeAndTranscribe(){
     throw new Error('file အမျိုးအစား မသိဘူး — MP4/MOV/M4A/WAV ပဲ ရတယ်');
   TQ = []; decodeDone = false; decodeErr = null;
   accLen = 0; chunkCounter = 0;
-  S.totalChunks = null;
-  const prog = (p)=>setRun(null, 'audio ထုတ်နေတယ်… '+Math.round(p*100)+'%');
+  S.totalChunks = null; S.transcribeStarted = false;
+  const prog = (p)=>{
+    if(!S.transcribeStarted) setRun(null, 'audio ထုတ်နေတယ်… '+Math.round(p*100)+'%');
+  };
   const t1 = transcribeLoop();
   const t2 = (kind === 'wav') ? decodeWav(prog) : decodeMp4(prog);
   await t1; await t2;
